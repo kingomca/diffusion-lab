@@ -1,0 +1,15 @@
+/* Conservative cell-centered finite-volume diffusion; mm and seconds. */
+(function(root){
+class DiffusionModel{
+ constructor(p={}){this.h=.025;this.nx=320;this.p={inside:.002,fluid:.01,outside:.0005,thickness:.15,hole:.15,spacing:.4,...p};this.sources=[];this.build();}
+ index(x,y){return Math.floor((y-this.ymin)/this.h)*this.nx+Math.floor((x+4)/this.h);}
+ build(){const h=this.h,p=this.p;this.wallRows=Math.round(p.thickness/h);this.thickness=this.wallRows*h;this.ymin=-this.thickness-.8;this.ny=Math.round((4-this.ymin)/h);const n=this.nx*this.ny;this.c=new Float64Array(n);this.next=new Float64Array(n);this.kind=new Uint8Array(n);this.d=new Float64Array(n);this.right=new Float64Array(n);this.up=new Float64Array(n);this.fixed=new Uint8Array(n);this.centers=[];const count=Math.floor((4-p.hole)/p.spacing)+1;for(let k=0;k<count;k++)this.centers.push((k-(count-1)/2)*p.spacing);
+ for(let j=0;j<this.ny;j++)for(let i=0;i<this.nx;i++){const a=j*this.nx+i,x=-4+(i+.5)*h,y=this.ymin+(j+.5)*h;let kind=0;if(y>=0)kind=x*x+y*y<=4?1:2;else if(Math.abs(x)<2){if(y< -this.thickness)kind=3;else if(this.centers.some(cx=>Math.abs(x-cx)<p.hole/2-1e-9))kind=3;}this.kind[a]=kind;this.d[a]=kind===1?p.inside:kind===2?p.outside:kind===3?p.fluid:0;if(y>=0&&(i===0||i===this.nx-1||j===this.ny-1))this.fixed[a]=1;}
+ const face=(a,b)=>a&&b?2*a*b/(a+b):0;let maxSum=0;for(let j=0;j<this.ny;j++)for(let i=0;i<this.nx;i++){const a=j*this.nx+i;if(i+1<this.nx)this.right[a]=face(this.d[a],this.d[a+1]);if(j+1<this.ny)this.up[a]=face(this.d[a],this.d[a+this.nx]);const sum=this.right[a]+this.up[a]+(i?this.right[a-1]:0)+(j?this.up[a-this.nx]:0);maxSum=Math.max(maxSum,sum);}this.dt=.9*h*h/maxSum;this.time=0;this.injected=0;this.sensors=this.centers.map(x=>({x,index:this.index(x,-this.thickness-h/2)}));this.profileIndices=[];for(let i=0;i<160;i++)this.profileIndices.push(this.index(-2+(i+.5)*h,h/2));}
+ addSource(x,y,mode,strength){if(!(y>0&&x*x+y*y<4))return false;const index=this.index(x,y);if(this.kind[index]!==1)return false;this.sources.push({x,y,index,mode,strength});if(mode==='pulse'){this.c[index]+=strength/(this.h*this.h);this.injected+=strength;}return true;}
+ reset(){this.build();for(const s of this.sources){s.index=this.index(s.x,s.y);if(s.mode==='pulse'){this.c[s.index]+=s.strength/(this.h*this.h);this.injected+=s.strength;}}}
+ step(dt=this.dt){dt=Math.min(dt,this.dt);const c=this.c,b=this.next,nx=this.nx,h2=this.h*this.h;for(let j=0;j<this.ny;j++)for(let i=0;i<nx;i++){const a=j*nx+i;if(!this.kind[a]||this.fixed[a]){b[a]=0;continue;}let f=0;if(i+1<nx)f+=this.right[a]*(c[a+1]-c[a]);if(i)f+=this.right[a-1]*(c[a-1]-c[a]);if(j+1<this.ny)f+=this.up[a]*(c[a+nx]-c[a]);if(j)f+=this.up[a-nx]*(c[a-nx]-c[a]);b[a]=c[a]+dt*f/h2;}for(const s of this.sources)if(s.mode==='continuous'){b[s.index]+=s.strength*dt/h2;this.injected+=s.strength*dt;}this.c=b;this.next=c;this.time+=dt;}
+ mass(){return this.c.reduce((a,b)=>a+b,0)*this.h*this.h;}
+}
+root.DiffusionModel=DiffusionModel;if(typeof module!=='undefined')module.exports=DiffusionModel;
+})(typeof globalThis!=='undefined'?globalThis:window);
